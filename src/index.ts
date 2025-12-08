@@ -184,11 +184,38 @@ async function startWatcher(path: string): Promise<void> {
   console.log('File watcher started. Press Ctrl+C to stop.');
 
   // Handle graceful shutdown
+  const shutdownWatcher = async () => {
+    console.log('\nStopping file watcher...')
+
+    // Step 1: Stop watcher and cancel queued work
+    watcher.stopWatching()
+
+    // Step 2: Close vector database connection
+    try {
+      await vectorDB.close()
+    } catch (error) {
+      console.error('Warning: Failed to close vector database during shutdown:', error)
+    }
+
+    // Step 3: Cleanup semantic engine resources
+    try {
+      semanticEngine.cleanup()
+    } catch (error) {
+      console.error('Warning: Failed to clean up semantic engine during shutdown:', error)
+    }
+
+    // Step 4: Close SQLite database and exit
+    try {
+      database.close()
+    } catch (error) {
+      console.error('Warning: Failed to close SQLite database during shutdown:', error)
+    }
+
+    process.exit(0)
+  }
+
   process.on('SIGINT', () => {
-    console.log('\nStopping file watcher...');
-    watcher.stopWatching();
-    database.close();
-    process.exit(0);
+    void shutdownWatcher()
   });
 }
 

@@ -353,6 +353,9 @@ In Memoria works for both individual developers and teams:
 ## Build from Source
 
 ```bash
+
+$env:PATH = "$env:USERPROFILE\.cargo\bin;" + $env:PATH; where cargo  
+
 git clone https://github.com/pi22by7/in-memoria
 cd in-memoria
 npm install

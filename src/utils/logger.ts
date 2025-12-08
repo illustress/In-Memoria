@@ -1,63 +1,79 @@
 /**
- * Safe logging utility for MCP server context
- * 
+ * Safe logging utility for MCP server context.
+ *
  * MCP STDIO Transport Protocol:
  * - STDOUT: Reserved for JSON-RPC messages ONLY
  * - STDERR: May be used for logging (per MCP spec)
- * 
- * When in MCP server mode, all logs go to STDERR to avoid polluting STDOUT.
- * When in CLI mode, logs go to their natural destinations (stdout/stderr).
+ *
+ * When in MCP server mode, non-error logs default to STDERR to keep STDOUT clean for JSON-RPC.
+ * Set MCP_LOG_STREAM=stdout to opt in to stdout logging if your host allows it.
  */
+
+type LogLevel = "INFO" | "WARN" | "ERROR" | "DEBUG";
 
 export class Logger {
   /**
    * Check if we're in MCP server mode (checked dynamically at each call)
    */
   private static isMCPServer(): boolean {
-    return process.env.MCP_SERVER === 'true';
+    return process.env.MCP_SERVER === "true";
   }
 
-  /**
-   * Log an error message
-   * - MCP mode: writes to stderr (allowed by MCP spec)
-   * - CLI mode: writes to stderr
-   */
-  static error(message: string, ...args: any[]): void {
-    console.error(message, ...args);
+  // Step 1: Normalize the message with a clear level tag
+  private static formatMessage(logLevel: LogLevel, message: string): string {
+    return `[${logLevel}] ${message}`;
   }
 
-  /**
-   * Log an info message
-   * - MCP mode: writes to stderr (allowed by MCP spec)
-   * - CLI mode: writes to stdout
-   */
-  static info(message: string, ...args: any[]): void {
+  // Step 2: Decide which stream to use for non-error logs
+  private static shouldUseStdout(
+    logLevel: Exclude<LogLevel, "ERROR">
+  ): boolean {
     if (this.isMCPServer()) {
-      // In MCP mode, write to stderr instead of stdout
-      // MCP spec allows stderr for logging
-      console.error(message, ...args);
-    } else {
-      console.log(message, ...args);
+      // In MCP mode keep stdout pristine unless explicitly opting in
+      return process.env.MCP_LOG_STREAM === "stdout";
     }
+
+    return true;
   }
 
-  /**
-   * Log a warning message
-   * - MCP mode: writes to stderr (allowed by MCP spec)
-   * - CLI mode: writes to stderr
-   */
-  static warn(message: string, ...args: any[]): void {
-    console.warn(message, ...args);
+  // Step 3: Emit to the selected stream with correct level semantics
+  private static emit(
+    logLevel: LogLevel,
+    message: string,
+    additionalArguments: any[]
+  ): void {
+    if (logLevel === "DEBUG" && process.env.DEBUG !== "true") {
+      return;
+    }
+
+    const formattedMessage = this.formatMessage(logLevel, message);
+    const isErrorLevel = logLevel === "ERROR";
+    const logToStdout =
+      !isErrorLevel &&
+      this.shouldUseStdout(logLevel as Exclude<LogLevel, "ERROR">);
+
+    if (logToStdout) {
+      console.log(formattedMessage, ...additionalArguments);
+      return;
+    }
+
+    console.error(formattedMessage, ...additionalArguments);
   }
 
-  /**
-   * Log a debug message (only when DEBUG=true)
-   * - MCP mode: writes to stderr (allowed by MCP spec)
-   * - CLI mode: writes to stderr
-   */
-  static debug(message: string, ...args: any[]): void {
-    if (process.env.DEBUG === 'true') {
-      console.error(`[DEBUG] ${message}`, ...args);
-    }
+  // Step 4: Public logging entry points
+  static error(message: string, ...additionalArguments: any[]): void {
+    this.emit("ERROR", message, additionalArguments);
+  }
+
+  static info(message: string, ...additionalArguments: any[]): void {
+    this.emit("INFO", message, additionalArguments);
+  }
+
+  static warn(message: string, ...additionalArguments: any[]): void {
+    this.emit("WARN", message, additionalArguments);
+  }
+
+  static debug(message: string, ...additionalArguments: any[]): void {
+    this.emit("DEBUG", message, additionalArguments);
   }
 }

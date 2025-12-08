@@ -8,6 +8,8 @@ pub struct AnalysisConfig {
     pub max_file_size: u64,
     /// Maximum files to process
     pub max_files: usize,
+    /// Additional path substrings to exclude (env: IN_MEMORIA_EXCLUDE or IN_MEMORIA_EXCLUDES)
+    pub excluded_patterns: Vec<String>,
     /// Supported file extensions
     pub supported_extensions: Vec<&'static str>,
 }
@@ -16,7 +18,8 @@ impl Default for AnalysisConfig {
     fn default() -> Self {
         Self {
             max_file_size: 1_048_576, // 1MB
-            max_files: 1000,
+            max_files: 5000,
+            excluded_patterns: Self::load_excluded_patterns(),
             supported_extensions: vec![
                 "ts", "tsx", "js", "jsx", "rs", "py", "go", "java",
                 "cpp", "c", "cs", "svelte", "sql", "php", "phtml", "inc"
@@ -26,10 +29,35 @@ impl Default for AnalysisConfig {
 }
 
 impl AnalysisConfig {
+    /// Load exclusion substrings from env (comma or semicolon separated)
+    fn load_excluded_patterns() -> Vec<String> {
+        let env_val = std::env::var("IN_MEMORIA_EXCLUDE")
+            .or_else(|_| std::env::var("IN_MEMORIA_EXCLUDES"));
+
+        if let Ok(raw) = env_val {
+            raw.split(|c| c == ',' || c == ';')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect()
+        } else {
+            Vec::new()
+        }
+    }
+
     /// Check if a file should be analyzed based on configuration rules
     pub fn should_analyze_file(&self, file_path: &Path) -> bool {
         // Skip common non-source directories and build artifacts
         let path_str = file_path.to_string_lossy();
+
+        // User-specified excludes (substring match)
+        if self
+            .excluded_patterns
+            .iter()
+            .any(|pat| path_str.contains(pat))
+        {
+            return false;
+        }
+
         if self.is_ignored_directory(&path_str) {
             return false;
         }
@@ -168,7 +196,8 @@ mod tests {
     fn test_default_config() {
         let config = AnalysisConfig::default();
         assert_eq!(config.max_file_size, 1_048_576);
-        assert_eq!(config.max_files, 1000);
+        assert_eq!(config.max_files, 5000);
+        assert!(config.excluded_patterns.is_empty());
         assert!(config.supported_extensions.contains(&"ts"));
         assert!(config.supported_extensions.contains(&"rs"));
         assert!(config.supported_extensions.contains(&"sql"));
@@ -275,6 +304,7 @@ mod tests {
         let config = AnalysisConfig {
             max_file_size: 500_000, // 500KB
             max_files: 500,
+            excluded_patterns: Vec::new(),
             supported_extensions: vec!["ts", "js", "rs"],
         };
 
@@ -312,5 +342,16 @@ mod tests {
         assert!(!config.is_ignored_file("app.js"));
         assert!(!config.is_ignored_file("package.json"));
         assert!(!config.is_ignored_file("test.ts"));
+    }
+
+    #[test]
+    fn test_custom_excludes_env() {
+        std::env::set_var("IN_MEMORIA_EXCLUDE", "frontend/out,.webpack");
+        let config = AnalysisConfig::default();
+        let include_path = Path::new("backend/src/main.rs");
+        let exclude_path = Path::new("frontend/out/bundle.js");
+        assert!(config.should_analyze_file(include_path));
+        assert!(!config.should_analyze_file(exclude_path));
+        std::env::remove_var("IN_MEMORIA_EXCLUDE");
     }
 }
